@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Meus Vídeos</title>
+<style>
+  :root{
+    --bg:#0f1210;
+    --card:#1c211d;
+    --accent:#7fbf9e;
+    --text:#f4efe4;
+    --muted:#9aa39a;
+    padding-top: env(safe-area-inset-top,0px);
+    padding-bottom: env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%; overscroll-behavior:none;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #feed{
+    height:100vh; height:100dvh; width:100%;
+    overflow-y:scroll; scroll-snap-type:y mandatory;
+    scrollbar-width:none;
+  }
+  #feed::-webkit-scrollbar{ display:none; }
+  .slide{
+    height:100vh; height:100dvh; width:100%; scroll-snap-align:start;
+    position:relative; display:flex; align-items:center; justify-content:center;
+    background:#000;
+  }
+  .slide iframe{ width:100%; height:100%; border:0; pointer-events:none; }
+  .slide .tap-catch{ position:absolute; inset:0; z-index:2; }
+  .slide .label{
+    position:absolute; left:16px; right:70px; bottom:calc(24px + env(safe-area-inset-bottom,0px));
+    font-size:1.05rem; font-weight:600; color:#fff; text-shadow:0 1px 6px rgba(0,0,0,.6);
+    z-index:3; pointer-events:none;
+  }
+  .placeholder{
+    width:100%; height:100%; background-size:cover; background-position:center;
+    filter:brightness(.55);
+  }
+  .play-hint{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:3rem; color:rgba(255,255,255,.85); z-index:3; pointer-events:none;
+  }
+  #empty{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    text-align:center; color:var(--muted); padding:40px; font-size:1.1rem; line-height:1.6;
+  }
+  #gear{
+    position:fixed; top:calc(14px + env(safe-area-inset-top,0px)); right:14px;
+    width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.12);
+    display:flex; align-items:center; justify-content:center; opacity:.55;
+    font-size:1.2rem; border:none; z-index:20; color:#fff;
+  }
+  .modal-bg{
+    position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
+    align-items:center; justify-content:center; z-index:60; padding:20px;
+  }
+  .modal-bg.open{ display:flex; }
+  .modal{
+    background:var(--card); border-radius:22px; padding:24px; width:100%; max-width:380px;
+    max-height:85vh; overflow-y:auto; color:var(--text);
+  }
+  .modal h2{ margin-top:0; color:var(--accent); font-size:1.2rem; }
+  .modal input{
+    width:100%; padding:12px 14px; border-radius:12px; border:1px solid #3a4038;
+    font-size:1rem; margin-bottom:12px; background:#12160f0; background:#141814; color:var(--text);
+  }
+  .modal button.primary{
+    width:100%; padding:13px; border:none; border-radius:12px; background:var(--accent);
+    color:#0f1210; font-size:1rem; font-weight:700; margin-bottom:8px;
+  }
+  .modal button.secondary{
+    width:100%; padding:12px; border:none; border-radius:12px; background:transparent;
+    color:var(--muted); font-size:.95rem;
+  }
+  .list-item{
+    display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #2a2f2b;
+  }
+  .list-item img{ width:64px; height:36px; object-fit:cover; border-radius:6px; }
+  .list-item span{ flex:1; font-size:.9rem; }
+  .list-item button{
+    border:none; background:#c07a6f; color:#fff; border-radius:8px; padding:6px 10px; font-size:.85rem;
+  }
+  #err{ color:#e0958a; font-size:.85rem; min-height:18px; }
+  #pin-err{ color:#e0958a; font-size:.85rem; min-height:18px; }
+</style>
+</head>
+<body>
+
+<div id="feed"></div>
+<div id="empty" style="display:none;">Ainda não tem vídeo aqui.<br>Peça pra um adulto adicionar 💚</div>
+<button id="gear">⚙️</button>
+
+<div class="modal-bg" id="pin-modal">
+  <div class="modal">
+    <h2>Modo responsável</h2>
+    <input type="password" inputmode="numeric" maxlength="4" id="pin-input" placeholder="Digite o PIN">
+    <div id="pin-err"></div>
+    <button class="primary" id="pin-confirm">Entrar</button>
+    <button class="secondary" id="pin-cancel">Cancelar</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="manage-modal">
+  <div class="modal">
+    <h2>Adicionar vídeo</h2>
+    <input type="text" id="url-input" placeholder="Cole o link do YouTube">
+    <input type="text" id="title-input" placeholder="Nome do vídeo (opcional)">
+    <div id="err"></div>
+    <button class="primary" id="add-btn">Adicionar</button>
+    <h2 style="margin-top:20px;">Vídeos na lista</h2>
+    <div id="manage-list"></div>
+    <button class="secondary" id="pin-change-btn">Trocar PIN</button>
+    <button class="secondary" id="close-manage">Fechar</button>
+  </div>
+</div>
+
+<script>
+const DEFAULT_PIN = "1234";
+const store = {
+  get videos(){ try{ return JSON.parse(localStorage.getItem('kv_videos')||'[]'); }catch(e){ return []; } },
+  set videos(v){ localStorage.setItem('kv_videos', JSON.stringify(v)); },
+  get pin(){ return localStorage.getItem('kv_pin') || DEFAULT_PIN; },
+  set pin(p){ localStorage.setItem('kv_pin', p); }
+};
+
+function extractId(url){
+  const m = url.match(/(?:youtu\.be\/|v=|shorts\/|embed\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+let observer;
+
+function renderFeed(){
+  const feed = document.getElementById('feed');
+  const empty = document.getElementById('empty');
+  const videos = store.videos;
+  feed.innerHTML = '';
+  empty.style.display = videos.length ? 'none' : 'flex';
+  if(observer) observer.disconnect();
+
+  videos.forEach(v=>{
+    const slide = document.createElement('div');
+    slide.className = 'slide';
+    slide.dataset.id = v.id;
+    slide.innerHTML = `
+      <div class="placeholder" style="background-image:url('https://i.ytimg.com/vi/${v.id}/hqdefault.jpg')"></div>
+      <div class="play-hint">▶</div>
+      <div class="tap-catch"></div>
+      ${v.title ? `<div class="label">${v.title}</div>` : ''}
+    `;
+    feed.appendChild(slide);
+  });
+
+  observer = new IntersectionObserver((entries)=>{
+    entries.forEach(entry=>{
+      const slide = entry.target;
+      if(entry.isIntersecting && entry.intersectionRatio > 0.75){
+        loadVideo(slide);
+      } else {
+        unloadVideo(slide);
+      }
+    });
+  }, { threshold: [0, 0.75, 1] });
+
+  document.querySelectorAll('.slide').forEach(s=> observer.observe(s));
+}
+
+function loadVideo(slide){
+  if(slide.querySelector('iframe')) return;
+  const id = slide.dataset.id;
+  const iframe = document.createElement('iframe');
+  iframe.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=0&playsinline=1&rel=0&modestbranding=1&controls=1&loop=1&playlist=${id}`;
+  iframe.allow = "autoplay; encrypted-media; fullscreen";
+  iframe.allowFullscreen = true;
+  iframe.style.pointerEvents = 'auto';
+  slide.insertBefore(iframe, slide.firstChild);
+  const ph = slide.querySelector('.placeholder');
+  const hint = slide.querySelector('.play-hint');
+  if(ph) ph.style.display = 'none';
+  if(hint) hint.style.display = 'none';
+}
+function unloadVideo(slide){
+  const iframe = slide.querySelector('iframe');
+  if(iframe) iframe.remove();
+  const ph = slide.querySelector('.placeholder');
+  const hint = slide.querySelector('.play-hint');
+  if(ph) ph.style.display = 'block';
+  if(hint) hint.style.display = 'flex';
+}
+
+// gear -> long press to open PIN
+let pressTimer;
+const gear = document.getElementById('gear');
+function startPress(){ pressTimer = setTimeout(openPinModal, 900); }
+function cancelPress(){ clearTimeout(pressTimer); }
+gear.addEventListener('touchstart', startPress);
+gear.addEventListener('touchend', cancelPress);
+gear.addEventListener('mousedown', startPress);
+gear.addEventListener('mouseup', cancelPress);
+gear.addEventListener('mouseleave', cancelPress);
+
+function openPinModal(){
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-err').textContent = '';
+  document.getElementById('pin-modal').classList.add('open');
+  document.getElementById('pin-input').focus();
+}
+document.getElementById('pin-cancel').onclick = ()=> document.getElementById('pin-modal').classList.remove('open');
+document.getElementById('pin-confirm').onclick = ()=>{
+  const val = document.getElementById('pin-input').value;
+  if(val === store.pin){
+    document.getElementById('pin-modal').classList.remove('open');
+    openManageModal();
+  } else {
+    document.getElementById('pin-err').textContent = 'PIN incorreto';
+  }
+};
+
+function openManageModal(){
+  renderManageList();
+  document.getElementById('manage-modal').classList.add('open');
+}
+document.getElementById('close-manage').onclick = ()=>{
+  document.getElementById('manage-modal').classList.remove('open');
+  renderFeed();
+};
+
+function renderManageList(){
+  const list = document.getElementById('manage-list');
+  const videos = store.videos;
+  list.innerHTML = videos.length ? '' : '<p style="color:var(--muted);font-size:.9rem;">Nenhum vídeo ainda.</p>';
+  videos.forEach((v,i)=>{
+    const row = document.createElement('div');
+    row.className = 'list-item';
+    row.innerHTML = `<img src="https://i.ytimg.com/vi/${v.id}/default.jpg"><span>${v.title || v.id}</span>`;
+    const del = document.createElement('button');
+    del.textContent = 'Remover';
+    del.onclick = ()=>{
+      const vs = store.videos; vs.splice(i,1); store.videos = vs; renderManageList();
+    };
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('add-btn').onclick = ()=>{
+  const url = document.getElementById('url-input').value.trim();
+  const title = document.getElementById('title-input').value.trim();
+  const err = document.getElementById('err');
+  const id = extractId(url);
+  if(!id){ err.textContent = 'Link do YouTube não reconhecido.'; return; }
+  const vs = store.videos;
+  vs.push({id, title});
+  store.videos = vs;
+  document.getElementById('url-input').value = '';
+  document.getElementById('title-input').value = '';
+  err.textContent = '';
+  renderManageList();
+};
+
+document.getElementById('pin-change-btn').onclick = ()=>{
+  const novo = prompt('Novo PIN (4 números):');
+  if(novo && /^\d{4}$/.test(novo)){ store.pin = novo; alert('PIN alterado!'); }
+  else if(novo){ alert('Use 4 números.'); }
+};
+
+renderFeed();
+</script>
+</body>
+</html>
